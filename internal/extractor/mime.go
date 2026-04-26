@@ -5,6 +5,23 @@ import (
 	"strings"
 )
 
+// DefaultSkipMimeTypes 默认跳过的MIME类型（图片和CSS）
+var DefaultSkipMimeTypes = []string{
+	// 图片类型
+	"image/png",
+	"image/jpeg",
+	"image/jpg",
+	"image/gif",
+	"image/webp",
+	"image/svg+xml",
+	"image/x-icon",
+	"image/vnd.microsoft.icon",
+	"image/bmp",
+	"image/tiff",
+	// 样式类型
+	"text/css",
+}
+
 // MimeTypeMapper MIME类型映射器接口
 type MimeTypeMapper interface {
 	GetExtension(mimeType string) string

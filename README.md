@@ -10,6 +10,7 @@
 - **编码处理**：支持base64编码的二进制内容解码
 - **冲突处理**：处理同名文件的命名冲突，支持路径长度限制
 - **过滤功能**：支持MIME类型和HTTP状态码过滤
+- **智能过滤**：默认跳过图片和CSS文件，使用 `-a` 参数可解析所有内容
 
 ## 安装
 
@@ -83,8 +84,22 @@ har-decode --help
 | --continue-on-error | -c   | 遇到错误继续处理                       | true     | 否       |
 | --stop-on-error     | -    | 遇到第一个错误停止                     | false    | 否       |
 | --skip-empty        | -    | 跳过空内容条目                         | false    | 否       |
+| --all               | -a   | 解析所有内容（包括图片和CSS文件）      | false    | 否       |
 | --help              | -h   | 显示帮助信息                           | -        | -        |
 | --version           | -V   | 显示版本信息                           | -        | -        |
+
+### 默认过滤说明
+
+默认情况下，工具会跳过以下类型的文件：
+- **图片文件**：png、jpg、jpeg、gif、webp、svg、ico、bmp、tiff
+- **样式文件**：css
+
+如果需要解析这些文件，请使用 `-a` 或 `--all` 参数：
+
+```bash
+# 解析所有内容（包括图片和CSS）
+har-decode --input ./example.har --all
+```
 
 ### 配置文件支持
 

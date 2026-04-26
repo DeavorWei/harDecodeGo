@@ -26,6 +26,7 @@ type ExtractConfig struct {
 	Workers           int                // 并发worker数量，0表示使用CPU核心数
 	FilterMimeTypes   []string           // MIME类型白名单（空表示全部）
 	FilterStatusCodes []int              // HTTP状态码白名单（空表示全部）
+	SkipMediaFiles    bool               // 是否跳过图片和CSS文件（默认true）
 	Verbose           bool               // 详细输出
 }
 
@@ -239,6 +240,16 @@ func (e *extractor) processEntry(entry *har.Entry, config *ExtractConfig, index 
 		StatusCode: entry.Response.Status,
 		MimeType:   entry.Response.Content.MimeType,
 		Size:       entry.Response.Content.Size,
+	}
+
+	// 默认黑名单过滤（图片和CSS）
+	if config.SkipMediaFiles {
+		for _, skipMime := range DefaultSkipMimeTypes {
+			if e.mimeMapper.Match(entry.Response.Content.MimeType, skipMime) {
+				result.Skipped = true
+				return result
+			}
+		}
 	}
 
 	// 状态码过滤

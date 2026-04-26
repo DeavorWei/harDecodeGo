@@ -112,6 +112,7 @@ func runAutoMode() error {
 			Workers:           4,
 			FilterMimeTypes:   nil,
 			FilterStatusCodes: nil,
+			SkipMediaFiles:    true, // 双击模式默认跳过图片和CSS
 			Verbose:           false,
 		}
 
@@ -163,6 +164,7 @@ func execute() error {
 		stopOnError     bool
 		skipEmpty       bool
 		showVersion     bool
+		parseAll        bool // 解析所有内容（包括图片和CSS）
 	)
 
 	rootCmd := &cobra.Command{
@@ -243,6 +245,7 @@ func execute() error {
 				Workers:           workers,
 				FilterMimeTypes:   mimeTypes,
 				FilterStatusCodes: statusCodes,
+				SkipMediaFiles:    !parseAll, // 默认跳过图片和CSS，-a参数时设为false
 				Verbose:           verbose,
 			}
 
@@ -262,6 +265,7 @@ func execute() error {
 	rootCmd.Flags().BoolVar(&stopOnError, "stop-on-error", false, "遇到第一个错误停止")
 	rootCmd.Flags().BoolVar(&skipEmpty, "skip-empty", false, "跳过空内容条目")
 	rootCmd.Flags().BoolVarP(&showVersion, "version", "V", false, "显示版本信息")
+	rootCmd.Flags().BoolVarP(&parseAll, "all", "a", false, "解析所有内容（包括图片和CSS文件）")
 
 	// 绑定viper
 	viper.BindPFlag("output", rootCmd.Flags().Lookup("output"))
