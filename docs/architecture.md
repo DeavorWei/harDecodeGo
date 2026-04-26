@@ -52,6 +52,35 @@ HAR文件结构
 4. **编码处理**：支持base64编码的二进制内容解码
 5. **冲突处理**：处理同名文件的命名冲突，支持路径长度限制
 6. **过滤功能**：支持MIME类型和HTTP状态码过滤
+7. **序号前缀**：按请求时间排序文件，并在文件名前添加序号前缀（如0001_filename.ext）
+
+### 1.3 序号前缀功能详解
+
+序号前缀功能确保提取的文件按HTTP请求时间顺序排列，便于追踪和分析请求流程。
+
+**功能特性**：
+- 文件按 `StartedDateTime` 字段升序排序
+- 序号位数根据文件总数动态调整（如788个文件使用4位：0001-0788）
+- 前缀格式：`{序号}_原始文件名`，如 `0001_index.html`
+
+**示例**：
+```
+输出目录/
+├── 0001_index.html      # 第1个请求（最早）
+├── 0002_style.css       # 第2个请求
+├── 0003_script.js       # 第3个请求
+├── ...
+├── 0787_api_data.json   # 第787个请求
+└── 0788_image.png       # 第788个请求（最晚）
+```
+
+**位数计算规则**：
+| 文件总数 | 序号位数 | 示例 |
+|----------|----------|------|
+| 1-9      | 1位      | 1_file.ext |
+| 10-99    | 2位      | 01_file.ext |
+| 100-999  | 3位      | 001_file.ext |
+| 1000+    | 4位+     | 0001_file.ext |
 
 ---
 
@@ -381,6 +410,8 @@ func (p *parser) ParseStream(filePath string, entryHandler func(*Entry) error) e
 package extractor
 
 import (
+    "sort"
+    "strconv"
     "sync"
     "har-decode/internal/har"
     "har-decode/internal/logger"
@@ -436,6 +467,13 @@ type ExtractError struct {
     Error error
 }
 
+// IndexedTask 带序号的提取任务（用于并发处理）
+type IndexedTask struct {
+    Entry  *har.Entry
+    Index  int  // 序号（从1开始）
+    Digits int  // 序号位数
+}
+
 // Extractor 提取器接口
 type Extractor interface {
     Extract(har *har.HAR, config *ExtractConfig) (*ExtractReport, error)
@@ -469,10 +507,32 @@ func NewExtractor(
     }
 }
 
+// calculateDigits 计算序号需要的位数
+func calculateDigits(total int) int {
+    if total <= 0 {
+        return 1
+    }
+    return len(strconv.Itoa(total))
+}
+
+// sortEntriesByTime 按请求时间排序entries
+func sortEntriesByTime(entries []har.Entry) {
+    sort.Slice(entries, func(i, j int) bool {
+        return entries[i].StartedDateTime < entries[j].StartedDateTime
+    })
+}
+
 func (e *extractor) Extract(har *har.HAR, config *ExtractConfig) (*ExtractReport, error) {
+    // 按请求时间排序
+    sortEntriesByTime(har.Log.Entries)
+
+    // 计算序号位数
+    totalEntries := len(har.Log.Entries)
+    digits := calculateDigits(totalEntries)
+
     report := &ExtractReport{
-        TotalEntries: len(har.Log.Entries),
-        Results:      make([]ExtractResult, 0, len(har.Log.Entries)),
+        TotalEntries: totalEntries,
+        Results:      make([]ExtractResult, 0, totalEntries),
         Errors:       make([]ExtractError, 0),
     }
 
@@ -1001,7 +1061,13 @@ type PathResult struct {
 
 // PathBuilder 路径构建器接口
 type PathBuilder interface {
-    Build(resourceURL, mimeType, outputDir string) (*PathResult, error)
+    // Build 构建带序号前缀的输出路径
+    // resourceURL: 资源URL
+    // mimeType: MIME类型
+    // outputDir: 输出目录
+    // index: 序号（从1开始）
+    // totalDigits: 序号总位数
+    Build(resourceURL, mimeType, outputDir string, index int, totalDigits int) (*PathResult, error)
 }
 
 type pathBuilder struct {
@@ -1019,7 +1085,7 @@ func NewPathBuilder(mimeMapper MimeTypeMapper, resolver ConflictResolver, log lo
     }
 }
 
-func (b *pathBuilder) Build(resourceURL, mimeType, outputDir string) (*PathResult, error) {
+func (b *pathBuilder) Build(resourceURL, mimeType, outputDir string, index int, totalDigits int) (*PathResult, error) {
     result := &PathResult{}
 
     // 解析URL
@@ -1056,6 +1122,9 @@ func (b *pathBuilder) Build(resourceURL, mimeType, outputDir string) (*PathResul
             relativePath += ext
         }
     }
+
+    // 添加序号前缀到文件名
+    relativePath = b.addIndexPrefix(relativePath, index, totalDigits)
 
     // 组合完整路径
     fullPath := filepath.Join(outputDir, relativePath)

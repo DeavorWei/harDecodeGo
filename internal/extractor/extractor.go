@@ -1,6 +1,8 @@
 package extractor
 
 import (
+	"sort"
+	"strconv"
 	"sync"
 
 	"har-decode/internal/har"
@@ -57,6 +59,13 @@ type ExtractError struct {
 	Error error
 }
 
+// IndexedTask 带序号的提取任务（用于并发处理）
+type IndexedTask struct {
+	Entry  *har.Entry
+	Index  int // 序号（从1开始）
+	Digits int // 序号位数
+}
+
 // Extractor 提取器接口
 type Extractor interface {
 	Extract(harData *har.HAR, config *ExtractConfig) (*ExtractReport, error)
@@ -90,16 +99,39 @@ func NewExtractor(
 	}
 }
 
+// calculateDigits 计算序号需要的位数
+func calculateDigits(total int) int {
+	if total <= 0 {
+		return 1
+	}
+	return len(strconv.Itoa(total))
+}
+
+// sortEntriesByTime 按请求时间排序entries
+func sortEntriesByTime(entries []har.Entry) {
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].StartedDateTime < entries[j].StartedDateTime
+	})
+}
+
 func (e *extractor) Extract(harData *har.HAR, config *ExtractConfig) (*ExtractReport, error) {
+	// 按请求时间排序
+	sortEntriesByTime(harData.Log.Entries)
+
+	// 计算序号位数
+	totalEntries := len(harData.Log.Entries)
+	digits := calculateDigits(totalEntries)
+
 	report := &ExtractReport{
-		TotalEntries: len(harData.Log.Entries),
-		Results:      make([]ExtractResult, 0, len(harData.Log.Entries)),
+		TotalEntries: totalEntries,
+		Results:      make([]ExtractResult, 0, totalEntries),
 		Errors:       make([]ExtractError, 0),
 	}
 
 	for i := range harData.Log.Entries {
 		entry := &harData.Log.Entries[i]
-		result := e.processEntry(entry, config)
+		index := i + 1 // 序号从1开始
+		result := e.processEntry(entry, config, index, digits)
 		report.Results = append(report.Results, result)
 
 		if result.Success {
@@ -125,13 +157,21 @@ func (e *extractor) Extract(harData *har.HAR, config *ExtractConfig) (*ExtractRe
 }
 
 func (e *extractor) ExtractParallel(harData *har.HAR, config *ExtractConfig) (*ExtractReport, error) {
+	// 按请求时间排序
+	sortEntriesByTime(harData.Log.Entries)
+
+	// 计算序号位数
+	totalEntries := len(harData.Log.Entries)
+	digits := calculateDigits(totalEntries)
+
 	workers := config.Workers
 	if workers <= 0 {
 		workers = 4 // 默认4个worker
 	}
 
-	entriesChan := make(chan *har.Entry, workers)
-	resultsChan := make(chan ExtractResult, len(harData.Log.Entries))
+	// 使用带序号的任务channel
+	taskChan := make(chan *IndexedTask, workers)
+	resultsChan := make(chan ExtractResult, totalEntries)
 
 	var wg sync.WaitGroup
 
@@ -140,19 +180,24 @@ func (e *extractor) ExtractParallel(harData *har.HAR, config *ExtractConfig) (*E
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for entry := range entriesChan {
-				result := e.processEntry(entry, config)
+			for task := range taskChan {
+				result := e.processEntry(task.Entry, config, task.Index, task.Digits)
 				resultsChan <- result
 			}
 		}()
 	}
 
-	// 发送任务
+	// 发送带序号的任务（序号在此处预分配，确保并发安全）
 	go func() {
 		for i := range harData.Log.Entries {
-			entriesChan <- &harData.Log.Entries[i]
+			task := &IndexedTask{
+				Entry:  &harData.Log.Entries[i],
+				Index:  i + 1, // 序号从1开始
+				Digits: digits,
+			}
+			taskChan <- task
 		}
-		close(entriesChan)
+		close(taskChan)
 	}()
 
 	// 等待完成并收集结果
@@ -163,8 +208,8 @@ func (e *extractor) ExtractParallel(harData *har.HAR, config *ExtractConfig) (*E
 
 	// 汇总结果
 	report := &ExtractReport{
-		TotalEntries: len(harData.Log.Entries),
-		Results:      make([]ExtractResult, 0, len(harData.Log.Entries)),
+		TotalEntries: totalEntries,
+		Results:      make([]ExtractResult, 0, totalEntries),
 		Errors:       make([]ExtractError, 0),
 	}
 
@@ -188,7 +233,7 @@ func (e *extractor) ExtractParallel(harData *har.HAR, config *ExtractConfig) (*E
 	return report, nil
 }
 
-func (e *extractor) processEntry(entry *har.Entry, config *ExtractConfig) ExtractResult {
+func (e *extractor) processEntry(entry *har.Entry, config *ExtractConfig, index int, digits int) ExtractResult {
 	result := ExtractResult{
 		URL:        entry.Request.URL,
 		StatusCode: entry.Response.Status,
@@ -243,8 +288,8 @@ func (e *extractor) processEntry(entry *har.Entry, config *ExtractConfig) Extrac
 	// 使用formatter格式化完整HTTP信息
 	formattedOutput := e.formatter.FormatFullHTTP(entry, string(data))
 
-	// 构建输出路径
-	pathResult, err := e.pathBuilder.Build(entry.Request.URL, entry.Response.Content.MimeType, config.OutputDir)
+	// 构建输出路径（带序号前缀）
+	pathResult, err := e.pathBuilder.Build(entry.Request.URL, entry.Response.Content.MimeType, config.OutputDir, index, digits)
 	if err != nil {
 		result.Error = err
 		return result

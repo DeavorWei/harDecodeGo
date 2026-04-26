@@ -31,7 +31,13 @@ type MimeTypeMapper interface {
 
 // PathBuilder 路径构建器接口
 type PathBuilder interface {
-	Build(resourceURL, mimeType, outputDir string) (*PathResult, error)
+	// Build 构建带序号前缀的输出路径
+	// resourceURL: 资源URL
+	// mimeType: MIME类型
+	// outputDir: 输出目录
+	// index: 序号（从1开始）
+	// totalDigits: 序号总位数
+	Build(resourceURL, mimeType, outputDir string, index int, totalDigits int) (*PathResult, error)
 }
 
 type pathBuilder struct {
@@ -49,7 +55,7 @@ func NewPathBuilder(mimeMapper MimeTypeMapper, resolver ConflictResolver, log lo
 	}
 }
 
-func (b *pathBuilder) Build(resourceURL, mimeType, outputDir string) (*PathResult, error) {
+func (b *pathBuilder) Build(resourceURL, mimeType, outputDir string, index int, totalDigits int) (*PathResult, error) {
 	result := &PathResult{}
 
 	// 解析URL
@@ -87,6 +93,9 @@ func (b *pathBuilder) Build(resourceURL, mimeType, outputDir string) (*PathResul
 		}
 	}
 
+	// 添加序号前缀到文件名
+	relativePath = b.addIndexPrefix(relativePath, index, totalDigits)
+
 	// 组合完整路径
 	fullPath := filepath.Join(outputDir, relativePath)
 	result.OriginalPath = fullPath
@@ -114,6 +123,24 @@ func (b *pathBuilder) Build(resourceURL, mimeType, outputDir string) (*PathResul
 	}
 
 	return result, nil
+}
+
+// addIndexPrefix 为文件路径添加序号前缀
+func (b *pathBuilder) addIndexPrefix(relativePath string, index int, totalDigits int) string {
+	// 生成序号前缀，格式如：0001_
+	indexPrefix := fmt.Sprintf("%0*d_", totalDigits, index)
+
+	// 获取目录和文件名
+	dir := filepath.Dir(relativePath)
+	fileName := filepath.Base(relativePath)
+
+	// 如果是当前目录（dir == "."），直接添加前缀
+	if dir == "." {
+		return indexPrefix + fileName
+	}
+
+	// 否则在文件名前添加前缀
+	return filepath.Join(dir, indexPrefix+fileName)
 }
 
 func (b *pathBuilder) shortenPath(path string, maxLen int) string {
